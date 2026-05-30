@@ -1,0 +1,20 @@
+{
+  "name": "nailong-photobooth",
+  "version": "1.0.0",
+  "description": "Nailong Photobooth - Photo & Video booth with email sending",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js"
+  },
+  "keywords": ["photobooth", "nailong", "camera", "photo"],
+  "author": "Syafrizal",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
