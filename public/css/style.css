@@ -102,7 +102,99 @@ h1 {
 }
 
 @media (max-width: 960px) {
-  .container { grid-template-columns: 1fr; }
+  .container {
+    grid-template-columns: 1fr;
+    padding: 12px;
+    gap: 14px;
+  }
+  header {
+    padding: 20px 12px 6px;
+  }
+  .header-mascot {
+    width: 80px;
+    height: 80px;
+  }
+  .header-mascot .fallback {
+    font-size: 60px;
+  }
+  .camera-panel {
+    padding: 12px;
+    border-radius: 18px;
+  }
+  .panel {
+    padding: 14px;
+    border-radius: 16px;
+  }
+  .controls {
+    gap: 8px;
+  }
+  .btn {
+    padding: 12px 16px;
+    font-size: 12px;
+  }
+  .btn-big {
+    padding: 14px 20px;
+    font-size: 13px;
+  }
+  .modal-content {
+    padding: 20px 18px;
+    border-radius: 18px;
+  }
+  .modal h2 {
+    font-size: 22px;
+  }
+  .modal p {
+    font-size: 13px;
+  }
+  .countdown-number {
+    font-size: 120px;
+  }
+  .frames-grid {
+    grid-template-columns: repeat(2, 1fr);
+    max-height: 280px;
+  }
+  .colors {
+    gap: 6px;
+  }
+  .color-opt {
+    width: 32px;
+    height: 32px;
+  }
+  .strip-preview {
+    padding: 8px;
+    min-height: 70px;
+  }
+  .strip-slot {
+    width: 60px;
+    height: 45px;
+  }
+  .status-bar {
+    font-size: 11px;
+    padding: 10px 14px;
+  }
+  h1 {
+    font-size: 36px;
+  }
+  .tagline {
+    font-size: 11px;
+    letter-spacing: 2px;
+  }
+  .frame-tabs {
+    gap: 4px;
+  }
+  .frame-tab {
+    font-size: 9px;
+    padding: 7px 4px;
+    min-width: 60px;
+  }
+  .help-bubble {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    max-width: none;
+    font-size: 11px;
+  }
+  .sticker { display: none !important; }
 }
 
 /* ============ CAMERA PANEL ============ */

@@ -1,45 +1,53 @@
 /* ============================================
-   NAILONG PHOTOBOOTH - Main App Logic
+   NAILONG PHOTOBOOTH v3 - Main App Logic
+   - Strip double + diacak
+   - EmailJS (no backend)
+   - Mobile responsive
+   - Drop GIF & Boomerang
    ============================================ */
 
+// ============ EMAILJS CONFIG ============
+// Ganti dengan kredensial dari dashboard EmailJS Anda
+const EMAILJS_CONFIG = {
+  PUBLIC_KEY: 'K_oHphWl6fECj50Wa',
+  SERVICE_ID: 'service_8ufike6',
+  TEMPLATE_ID: 'template_pc3aqi6'
+};
+
+// Initialize EmailJS
+if (window.emailjs) {
+  emailjs.init({ publicKey: EMAILJS_CONFIG.PUBLIC_KEY });
+}
+
 const state = {
-  // Camera
   stream: null,
   devices: [],
   currentDeviceId: null,
-  facingMode: 'user',
   cameraTested: false,
 
-  // Wizard
   currentStep: 0,
   confirmedSteps: { camera: false, layout: false, color: false, frame: false },
 
-  // Settings
   gridCount: 3,
-  selectedFrame: 'border-flowers',
+  selectedFrame: 'theme-kawaii',
   stripColor: '#fffdf5',
-  frameCategory: 'border',
+  frameCategory: 'themed',
 
-  // Photos: array of { dataURL, retakeCount }
   capturedPhotos: [],
-  currentSlot: 0, // which slot are we filling
+  currentSlot: 0,
   isCapturing: false,
 
-  // Video
   mediaRecorder: null,
   videoChunks: [],
   isRecording: false,
   recordStart: 0,
   recordTimer: null,
 
-  // Last result for output options
   lastStripCanvas: null,
-  lastVideoBlob: null,
-  lastGifBlob: null,
-  lastBoomerangBlob: null
+  lastVideoBlob: null
 };
 
-const MAX_RETAKES = 3; // max 3 attempts per photo slot
+const MAX_RETAKES = 3;
 const COUNTDOWN_SECONDS = 5;
 
 const STRIP_COLORS = [
@@ -50,11 +58,11 @@ const STRIP_COLORS = [
 
 const STEPS_INFO = [
   { num: 0, text: 'Welcome! Klik tombol di bawah untuk mulai 🐲' },
-  { num: 1, text: 'Step 1: Pilih kamera yang mau dipakai, lalu test & confirm' },
+  { num: 1, text: 'Step 1: Pilih kamera, lalu test & confirm' },
   { num: 2, text: 'Step 2: Pilih layout (3 atau 4 grid) → Confirm Layout' },
   { num: 3, text: 'Step 3: Pilih warna strip → Confirm Color' },
   { num: 4, text: 'Step 4: Pilih frame → Confirm Frame' },
-  { num: 5, text: 'Semua siap! Klik 📷 Take Photos untuk mulai' }
+  { num: 5, text: 'All set! Klik 📷 Take Photos untuk mulai' }
 ];
 
 // ============ STEP MANAGEMENT ============
@@ -147,15 +155,12 @@ function showHelp(text, duration = 4000) {
   showHelp._t = setTimeout(() => bubble.classList.remove('show'), duration);
 }
 
-// ============ CAMERA MANAGEMENT ============
+// ============ CAMERA ============
 async function enumerateCameras() {
   try {
-    // Need to request permission first to get device labels
     const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     tempStream.getTracks().forEach(t => t.stop());
-  } catch (e) {
-    // ignore — will fall through
-  }
+  } catch (e) {}
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     state.devices = devices.filter(d => d.kind === 'videoinput');
@@ -185,30 +190,22 @@ function populateCameraSelect() {
 }
 
 async function startCamera(deviceId = null) {
-  // Stop any existing stream first (release the device lock)
   if (state.stream) {
     state.stream.getTracks().forEach(t => t.stop());
     state.stream = null;
-    // Tiny pause so Windows can release the device
     await new Promise(r => setTimeout(r, 200));
   }
 
-  // Try a sequence of constraint configurations, from "best" to "anything works"
   const attempts = [];
   if (deviceId) {
-    // 1. Exact device + HD
     attempts.push({ video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: true });
-    // 2. Exact device + lower res
     attempts.push({ video: { deviceId: { exact: deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }, audio: true });
-    // 3. Exact device, no resolution constraint
     attempts.push({ video: { deviceId: { exact: deviceId } }, audio: true });
-    // 4. Exact device, no audio (some webcams expose only video)
     attempts.push({ video: { deviceId: { exact: deviceId } }, audio: false });
-    // 5. Soft device match (not exact)
     attempts.push({ video: { deviceId: deviceId }, audio: false });
   } else {
-    attempts.push({ video: { facingMode: state.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: true });
-    attempts.push({ video: { facingMode: state.facingMode }, audio: true });
+    attempts.push({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: true });
+    attempts.push({ video: { facingMode: 'user' }, audio: true });
     attempts.push({ video: true, audio: true });
     attempts.push({ video: true, audio: false });
   }
@@ -226,20 +223,17 @@ async function startCamera(deviceId = null) {
         const track = state.stream.getVideoTracks()[0];
         const settings = track.getSettings ? track.getSettings() : {};
         const res = (settings.width && settings.height) ? ` @ ${settings.width}×${settings.height}` : '';
-        const hasAudio = state.stream.getAudioTracks().length > 0;
-        statusEl.innerHTML = `✓ Camera connected${res}${hasAudio ? '' : ' (no audio)'}`;
+        statusEl.innerHTML = `✓ Camera connected${res}`;
         statusEl.className = 'camera-status ok';
       }
       return true;
     } catch (err) {
       lastErr = err;
-      console.warn('Camera attempt failed:', constraints, err.name, err.message);
-      // For NotAllowedError, stop trying — user explicitly denied
+      console.warn('Camera attempt failed:', err.name, err.message);
       if (err.name === 'NotAllowedError' || err.name === 'SecurityError') break;
     }
   }
 
-  // All attempts failed
   const statusEl = document.getElementById('cameraStatus');
   if (statusEl) {
     statusEl.textContent = '✗ ' + (lastErr ? lastErr.message : 'Failed');
@@ -252,95 +246,58 @@ async function startCamera(deviceId = null) {
 function showCameraErrorModal(err) {
   const name = err ? err.name : 'Unknown';
   const message = err ? err.message : 'Unknown error';
-
-  // Map common error names to helpful Indonesian explanations
   let title = 'Camera Error 😢';
-  let causes = [];
-  let solutions = [];
+  let causes = [], solutions = [];
 
   if (name === 'NotReadableError' || name === 'TrackStartError' || /could not start/i.test(message)) {
-    title = 'Kamera Lagi Dipakai Aplikasi Lain 🔒';
-    causes = [
-      'Kamera lagi dibuka oleh Zoom, Teams, OBS, Discord, atau Camera app Windows',
-      'Tab browser lain juga lagi pakai kamera ini',
-      'Driver kamera nyangkut (perlu restart)'
-    ];
-    solutions = [
-      '<strong>Tutup semua aplikasi yang pakai kamera</strong> (cek system tray pojok kanan bawah)',
-      'Tutup tab browser lain yang punya akses kamera',
-      'Buka <strong>Windows Camera app</strong> — kalau di sana juga error, restart laptop',
-      'Cabut & colok ulang kabel USB kamera (kalau external)'
-    ];
+    title = 'Kamera Lagi Dipakai 🔒';
+    causes = ['Zoom/Teams/OBS/Camera app sedang aktif', 'Tab browser lain pakai kamera', 'Driver nyangkut'];
+    solutions = ['Tutup semua app yang pake kamera', 'Tutup tab browser lain', 'Restart laptop'];
   } else if (name === 'NotAllowedError' || name === 'SecurityError') {
-    title = 'Akses Kamera Ditolak 🚫';
-    causes = [
-      'Kamu klik "Block" pas browser nanya izin kamera',
-      'Windows Privacy Settings blok akses kamera untuk browser'
-    ];
-    solutions = [
-      'Klik icon <strong>🔒 gembok</strong> di address bar → izinkan Camera',
-      'Buka <code>chrome://settings/content/camera</code> → cari URL ini, set Allow',
-      'Windows: <code>Win + I</code> → Privacy → Camera → On untuk Chrome'
-    ];
-  } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    title = 'Akses Ditolak 🚫';
+    causes = ['Browser nge-block akses kamera'];
+    solutions = ['Klik 🔒 di address bar → izinkan Camera', 'Reload halaman'];
+  } else if (name === 'NotFoundError') {
     title = 'Kamera Tidak Ditemukan 📷';
-    causes = ['Tidak ada webcam yang nyambung', 'Driver kamera belum terinstall'];
-    solutions = [
-      'Cek koneksi kabel USB kamera',
-      'Restart laptop',
-      'Update driver di Device Manager → Cameras'
-    ];
-  } else if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
-    title = 'Kamera Tidak Support Setting Ini ⚙️';
-    causes = ['Resolution yang diminta tidak didukung kamera'];
-    solutions = ['Coba reload halaman — saya udah tambah fallback otomatis'];
+    causes = ['Tidak ada webcam tersambung'];
+    solutions = ['Cek kabel USB', 'Restart laptop'];
   } else {
-    causes = ['Penyebab tidak diketahui'];
-    solutions = ['Reload halaman', 'Coba browser lain (Chrome/Edge)', 'Restart laptop'];
+    causes = ['Error tidak dikenal'];
+    solutions = ['Reload halaman', 'Coba browser lain'];
   }
 
-  let bodyHTML = `
-    <p style="text-align:left; font-size:14px;">
-      <strong>Error:</strong> <code style="background:#eee;padding:2px 6px;border-radius:4px;font-size:12px">${name}</code><br>
-      <span style="opacity:0.7">${message}</span>
+  const bodyHTML = `
+    <p style="text-align:left; font-size:13px;">
+      <strong>Error:</strong> <code style="background:#eee;padding:2px 6px;border-radius:4px;font-size:11px">${name}</code><br>
+      <span style="opacity:0.7;font-size:12px">${message}</span>
     </p>
-
-    <div style="background:#fff5d6; border:2px solid #1a1a1a; border-radius:12px; padding:14px; margin:14px 0; text-align:left;">
-      <div style="font-family:'DM Mono',monospace; font-size:11px; text-transform:uppercase; opacity:0.6; margin-bottom:6px;">Kemungkinan penyebab:</div>
-      <ul style="margin:0; padding-left:20px; font-size:13px;">
-        ${causes.map(c => `<li>${c}</li>`).join('')}
-      </ul>
+    <div style="background:#fff5d6; border:2px solid #1a1a1a; border-radius:12px; padding:12px; margin:12px 0; text-align:left;">
+      <div style="font-family:'DM Mono',monospace; font-size:10px; text-transform:uppercase; opacity:0.6; margin-bottom:4px;">Penyebab:</div>
+      <ul style="margin:0; padding-left:18px; font-size:12px;">${causes.map(c => `<li>${c}</li>`).join('')}</ul>
     </div>
-
-    <div style="background:#b8e0d2; border:2px solid #1a1a1a; border-radius:12px; padding:14px; margin:14px 0; text-align:left;">
-      <div style="font-family:'DM Mono',monospace; font-size:11px; text-transform:uppercase; opacity:0.7; margin-bottom:6px;">Yang bisa kamu coba:</div>
-      <ol style="margin:0; padding-left:20px; font-size:13px;">
-        ${solutions.map(s => `<li style="margin-bottom:4px">${s}</li>`).join('')}
-      </ol>
+    <div style="background:#b8e0d2; border:2px solid #1a1a1a; border-radius:12px; padding:12px; margin:12px 0; text-align:left;">
+      <div style="font-family:'DM Mono',monospace; font-size:10px; text-transform:uppercase; opacity:0.7; margin-bottom:4px;">Solusi:</div>
+      <ol style="margin:0; padding-left:18px; font-size:12px;">${solutions.map(s => `<li>${s}</li>`).join('')}</ol>
     </div>
   `;
 
   openModal({
-    title,
-    body: bodyHTML,
-    mascot: false,
-    wide: true,
+    title, body: bodyHTML, mascot: false, wide: true,
     buttons: [
-      { label: '🔄 Coba Lagi (Retry)', class: 'btn-primary', onClick: async () => {
+      { label: '🔄 Coba Lagi', class: 'btn-primary', onClick: async () => {
         closeModal();
         const select = document.getElementById('cameraSelect');
         const id = select && select.value ? select.value : (state.devices[0] && state.devices[0].deviceId);
         await startCamera(id);
       }},
-      { label: '↻ Reload Halaman', class: 'btn-secondary', onClick: () => location.reload() },
-      { label: 'Tutup', class: 'btn-ghost', onClick: closeModal }
+      { label: '↻ Reload', class: 'btn-secondary', onClick: () => location.reload() }
     ]
   });
 }
 
 async function testCamera() {
   const statusEl = document.getElementById('cameraStatus');
-  statusEl.textContent = '⏳ Testing camera...';
+  statusEl.textContent = '⏳ Testing...';
   statusEl.className = 'camera-status testing';
   const select = document.getElementById('cameraSelect');
   const deviceId = select.value;
@@ -349,14 +306,13 @@ async function testCamera() {
   if (ok) {
     state.cameraTested = true;
     document.getElementById('cameraConfirmBtn').disabled = false;
-    showHelp('Kamera oke! Lihat preview di atas. Kalau udah pas, klik Confirm Camera.');
+    showHelp('Kamera oke! Klik Confirm Camera kalau pas.');
   }
 }
 
-// ============ LIVE PREVIEW (frame overlay) ============
+// ============ LIVE PREVIEW ============
 function updateLivePreview() {
   const overlay = document.getElementById('frameOverlay');
-  // Saat masih di wizard step <4 (sebelum confirm frame), tidak tampilkan frame
   if (state.currentStep < 4) {
     overlay.innerHTML = '';
     return;
@@ -373,20 +329,33 @@ function updateLivePreview() {
   c.height = vh;
   const ctx = c.getContext('2d');
 
-  if (frame.cat === 'scene' && frame.bg) {
-    const grad = ctx.createLinearGradient(0, 0, 0, vh);
-    grad.addColorStop(0, frame.bg[0] + '55');
-    grad.addColorStop(1, frame.bg[2] + '55');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, vw, vh);
+  try {
+    // Step 1: Draw frame at full size
+    frame.render(ctx, 0, 0, vw, vh, frame, {
+      size: vh / 10,
+      tapeW: vw * 0.2,
+      tapeH: vh / 22,
+      borderW: Math.min(vw, vh) * 0.08
+    });
+    // Step 2: Clear center area so video shows through
+    const inset = 0.15;
+    const px = vw * inset;
+    const py = vh * inset;
+    const iw = vw * (1 - inset * 2);
+    const ih = vh * (1 - inset * 2);
+    ctx.clearRect(px, py, iw, ih);
+    // Step 3: Draw border around photo area
+    ctx.strokeStyle = '#1a1a1a';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(px, py, iw, ih);
+  } catch (e) {
+    console.error('Live preview error', e);
   }
-  frame.render(ctx, 0, 0, vw, vh, frame, { size: vh / 12, tapeW: vw * 0.2, tapeH: vh / 25 });
   overlay.appendChild(c);
 }
 
 // ============ UI INIT ============
 function initUI() {
-  // Colors
   const cp = document.getElementById('colorPicker');
   STRIP_COLORS.forEach((c, i) => {
     const el = document.createElement('div');
@@ -402,7 +371,6 @@ function initUI() {
     cp.appendChild(el);
   });
 
-  // Grid options
   document.querySelectorAll('.grid-opt').forEach(opt => {
     opt.addEventListener('click', () => {
       if (state.currentStep < 2) return;
@@ -412,7 +380,6 @@ function initUI() {
     });
   });
 
-  // Frame tabs
   document.querySelectorAll('.frame-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.frame-tab').forEach(t => t.classList.remove('active'));
@@ -424,28 +391,23 @@ function initUI() {
 
   renderFramesGrid();
 
-  // Camera selector
   document.getElementById('cameraSelect').addEventListener('change', () => {
     state.cameraTested = false;
     document.getElementById('cameraConfirmBtn').disabled = true;
     const statusEl = document.getElementById('cameraStatus');
-    statusEl.textContent = '⚠ Click "Test Camera" untuk preview';
+    statusEl.textContent = '⚠ Klik Test Camera untuk preview';
     statusEl.className = 'camera-status testing';
   });
 
   document.getElementById('cameraTestBtn').addEventListener('click', testCamera);
 
-  // Confirm buttons
   document.querySelectorAll('.panel-confirm').forEach(btn => {
     btn.addEventListener('click', () => handleConfirm(btn.dataset.confirm, btn));
   });
 
-  // Main buttons
   document.getElementById('snapBtn').addEventListener('click', confirmStartPhotoSession);
   document.getElementById('videoBtn').addEventListener('click', confirmToggleVideo);
   document.getElementById('resetBtn').addEventListener('click', confirmReset);
-
-  // Help bubble close
   document.getElementById('helpClose').addEventListener('click', () => {
     document.getElementById('helpBubble').classList.remove('show');
   });
@@ -486,16 +448,11 @@ function selectFrame(id) {
 // ============ CONFIRM HANDLERS ============
 function handleConfirm(type, btn) {
   if (type === 'camera') {
-    if (!state.cameraTested) {
-      showHelp('Test kamera dulu sebelum confirm!');
-      return;
-    }
+    if (!state.cameraTested) { showHelp('Test kamera dulu!'); return; }
     openModal({
       title: 'Confirm Camera?',
-      body: 'Kamera ini akan dipake untuk semua foto & video. Lanjut?',
-      summary: {
-        Camera: state.devices.find(d => d.deviceId === state.currentDeviceId)?.label || 'Default'
-      },
+      body: 'Kamera ini akan dipakai untuk semua foto & video.',
+      summary: { Camera: state.devices.find(d => d.deviceId === state.currentDeviceId)?.label || 'Default' },
       buttons: [
         { label: '✓ Yes, Use This', class: 'btn-primary', onClick: () => {
           state.confirmedSteps.camera = true;
@@ -503,16 +460,22 @@ function handleConfirm(type, btn) {
           btn.textContent = 'Camera Locked';
           closeModal();
           setStep(2);
-          showHelp('Camera locked! Sekarang pilih layout (3 atau 4 grid)');
+          showHelp('Camera locked! Pilih layout.');
         }},
         { label: 'Cancel', class: 'btn-ghost', onClick: closeModal }
       ]
     });
   } else if (type === 'layout') {
+    const totalShots = state.gridCount;
+    const finalPhotos = state.gridCount * 2;
     openModal({
       title: 'Confirm Layout?',
-      body: `Kamu pilih <strong>${state.gridCount} Grid</strong>. Yakin?`,
-      summary: { Layout: `${state.gridCount} foto`, 'Max retake': `${MAX_RETAKES}x per foto` },
+      body: `Kamu akan ambil <strong>${totalShots} foto</strong>, lalu di-duplicate & diacak jadi <strong>${finalPhotos} foto</strong> di strip double.`,
+      summary: {
+        'Take photos': `${totalShots} foto`,
+        'Strip output': `${finalPhotos} foto (2 strip, diacak)`,
+        'Max retake': `${MAX_RETAKES}x per foto`
+      },
       buttons: [
         { label: '✓ Lock Layout', class: 'btn-primary', onClick: () => {
           state.confirmedSteps.layout = true;
@@ -520,15 +483,15 @@ function handleConfirm(type, btn) {
           btn.textContent = 'Layout Locked';
           closeModal();
           setStep(3);
-          showHelp('Layout oke! Sekarang pilih warna strip 🎨');
+          showHelp('Layout oke! Pilih warna strip.');
         }},
         { label: 'Cancel', class: 'btn-ghost', onClick: closeModal }
       ]
     });
   } else if (type === 'color') {
     openModal({
-      title: 'Confirm Strip Color?',
-      body: 'Warna ini jadi background photo strip kamu.',
+      title: 'Confirm Color?',
+      body: 'Warna ini jadi background photo strip.',
       previewHTML: `<div style="width:90px;height:140px;background:${state.stripColor};border:3px solid var(--ink);border-radius:8px;margin:0 auto"></div>`,
       buttons: [
         { label: '✓ Looks Good!', class: 'btn-primary', onClick: () => {
@@ -538,7 +501,7 @@ function handleConfirm(type, btn) {
           closeModal();
           setStep(4);
           updateLivePreview();
-          showHelp('Warna oke! Sekarang pilih frame favoritmu 🖼️');
+          showHelp('Warna oke! Pilih frame.');
         }},
         { label: 'Cancel', class: 'btn-ghost', onClick: closeModal }
       ]
@@ -547,16 +510,16 @@ function handleConfirm(type, btn) {
     const frame = window.FRAMES.find(f => f.id === state.selectedFrame);
     openModal({
       title: 'Confirm Frame?',
-      body: `Frame "<strong>${frame.label}</strong>" akan dipake di semua foto.`,
+      body: `Frame "<strong>${frame.label}</strong>" akan dipakai.`,
       summary: { Frame: frame.label, Category: frame.cat },
       buttons: [
-        { label: '✓ Confirm Frame', class: 'btn-primary', onClick: () => {
+        { label: '✓ Confirm', class: 'btn-primary', onClick: () => {
           state.confirmedSteps.frame = true;
           btn.classList.add('confirmed');
           btn.textContent = 'Frame Locked';
           closeModal();
           setStep(5);
-          showHelp('All set! 🎉 Klik 📷 Take Photos untuk mulai sesi foto');
+          showHelp('All set! Klik 📷 Take Photos.');
         }},
         { label: 'Cancel', class: 'btn-ghost', onClick: closeModal }
       ]
@@ -567,13 +530,10 @@ function handleConfirm(type, btn) {
 function confirmReset() {
   openModal({
     title: 'Restart Wizard? ↺',
-    body: 'Semua pilihan akan di-reset ke awal. Yakin?',
+    body: 'Semua pilihan akan di-reset.',
     buttons: [
-      { label: '✓ Yes, Restart', class: 'btn-primary', onClick: () => {
-        closeModal();
-        resetWizard();
-      }},
-      { label: 'No, Keep Going', class: 'btn-ghost', onClick: closeModal }
+      { label: '✓ Yes', class: 'btn-primary', onClick: () => { closeModal(); resetWizard(); }},
+      { label: 'No', class: 'btn-ghost', onClick: closeModal }
     ]
   });
 }
@@ -593,10 +553,9 @@ function resetWizard() {
   state.cameraTested = false;
   setStep(1);
   renderStripPreview();
-  showHelp('Wizard di-reset. Mulai dari Step 1 (kamera)');
 }
 
-// ============ STRIP PREVIEW (thumbnails of captured photos) ============
+// ============ STRIP PREVIEW ============
 function renderStripPreview() {
   const wrap = document.getElementById('stripPreview');
   wrap.innerHTML = '';
@@ -610,17 +569,14 @@ function renderStripPreview() {
     slot.className = 'strip-slot';
     if (i === state.currentSlot && state.isCapturing) slot.classList.add('active');
     if (!state.capturedPhotos[i]) slot.classList.add('empty');
-
     const num = document.createElement('div');
     num.className = 'slot-num';
     num.textContent = i + 1;
     slot.appendChild(num);
-
     if (state.capturedPhotos[i]) {
       const img = document.createElement('img');
       img.src = state.capturedPhotos[i].dataURL;
       slot.appendChild(img);
-
       if (state.capturedPhotos[i].retakeCount > 0) {
         const rc = document.createElement('div');
         rc.className = 'retake-count';
@@ -637,20 +593,16 @@ function confirmStartPhotoSession() {
   if (state.isCapturing || state.isRecording) return;
   const frame = window.FRAMES.find(f => f.id === state.selectedFrame);
   openModal({
-    title: 'Ready to Pose? 📸',
-    body: `${state.gridCount} foto akan diambil. Setiap foto ada countdown <strong>${COUNTDOWN_SECONDS} detik</strong>, dan kamu bisa retake sampai <strong>${MAX_RETAKES} kali</strong> per foto.`,
+    title: 'Ready? 📸',
+    body: `${state.gridCount} foto akan diambil dengan countdown ${COUNTDOWN_SECONDS} detik tiap foto. Retake max ${MAX_RETAKES}x. Hasil: <strong>strip double ${state.gridCount * 2} foto diacak</strong>.`,
     summary: {
-      Layout: `${state.gridCount} Grid`,
-      'Countdown': `${COUNTDOWN_SECONDS} detik`,
-      'Max Retake': `${MAX_RETAKES}x`,
+      Take: `${state.gridCount} foto`,
+      'Final strip': `${state.gridCount * 2} foto (2 strip)`,
       Frame: frame.label
     },
     buttons: [
-      { label: '🎬 Let\'s Go!', class: 'btn-primary', onClick: () => {
-        closeModal();
-        startPhotoSession();
-      }},
-      { label: 'Wait, Edit', class: 'btn-ghost', onClick: closeModal }
+      { label: "🎬 Let's Go!", class: 'btn-primary', onClick: () => { closeModal(); startPhotoSession(); }},
+      { label: 'Wait', class: 'btn-ghost', onClick: closeModal }
     ]
   });
 }
@@ -665,7 +617,6 @@ function countdown(seconds) {
     num.style.animation = 'none';
     void num.offsetWidth;
     num.style.animation = 'pop 1s ease-out';
-
     const interval = setInterval(() => {
       n--;
       if (n <= 0) {
@@ -694,7 +645,7 @@ function capturePhoto() {
   canvas.height = h;
   const ctx = canvas.getContext('2d');
   ctx.translate(w, 0);
-  ctx.scale(-1, 1); // mirror selfie
+  ctx.scale(-1, 1);
   ctx.drawImage(video, 0, 0, w, h);
   return canvas.toDataURL('image/png');
 }
@@ -703,7 +654,6 @@ async function startPhotoSession() {
   state.isCapturing = true;
   state.capturedPhotos = [];
   state.currentSlot = 0;
-
   document.getElementById('snapBtn').disabled = true;
   document.getElementById('videoBtn').disabled = true;
   document.getElementById('frameOverlay').style.display = 'none';
@@ -725,13 +675,10 @@ async function startPhotoSession() {
 
 async function captureSlot(slotIndex) {
   let retakeCount = 0;
-
   while (true) {
-    // Update UI badges
     const counter = document.getElementById('shotCounter');
     counter.classList.add('active');
     counter.textContent = `Foto ${slotIndex + 1} / ${state.gridCount}`;
-
     const retakeBadge = document.getElementById('retakeBadge');
     if (retakeCount > 0) {
       retakeBadge.classList.add('active');
@@ -739,80 +686,70 @@ async function captureSlot(slotIndex) {
     } else {
       retakeBadge.classList.remove('active');
     }
-
     renderStripPreview();
-
-    // Countdown
     await countdown(COUNTDOWN_SECONDS);
     const dataURL = capturePhoto();
-
-    // Save temporarily
     state.capturedPhotos[slotIndex] = { dataURL, retakeCount };
     renderStripPreview();
-
-    // Ask: keep or retake?
     const canRetake = retakeCount < MAX_RETAKES;
-    const userChoice = await askKeepOrRetake(slotIndex, dataURL, retakeCount, canRetake);
-
-    if (userChoice === 'keep') {
-      return;
-    }
-    // retake
+    const choice = await askKeepOrRetake(slotIndex, dataURL, retakeCount, canRetake);
+    if (choice === 'keep') return;
     retakeCount++;
   }
 }
 
 function askKeepOrRetake(slotIndex, dataURL, retakeCount, canRetake) {
   return new Promise(resolve => {
-    const remainingRetakes = MAX_RETAKES - retakeCount;
-    const summary = {
-      Slot: `Foto ${slotIndex + 1} dari ${state.gridCount}`,
-      'Retake used': `${retakeCount} / ${MAX_RETAKES}`
-    };
-
+    const remaining = MAX_RETAKES - retakeCount;
     const buttons = [
-      { label: '✓ Pakai Foto Ini', class: 'btn-primary', onClick: () => {
-        closeModal();
-        resolve('keep');
-      }}
+      { label: '✓ Pakai Foto Ini', class: 'btn-primary', onClick: () => { closeModal(); resolve('keep'); }}
     ];
-
     if (canRetake) {
-      buttons.push({
-        label: `↻ Retake (sisa ${remainingRetakes})`,
-        class: 'btn-secondary',
-        onClick: () => {
-          closeModal();
-          resolve('retake');
-        }
-      });
+      buttons.push({ label: `↻ Retake (sisa ${remaining})`, class: 'btn-secondary', onClick: () => { closeModal(); resolve('retake'); }});
     }
-
     openModal({
       title: canRetake ? `Foto ${slotIndex + 1} — Pilih?` : `Foto ${slotIndex + 1} — Retake habis`,
-      body: canRetake
-        ? 'Mau pakai foto ini atau retake?'
-        : 'Sudah pakai semua retake. Pakai foto ini ya!',
-      previewHTML: `<img src="${dataURL}" alt="Photo ${slotIndex + 1}" style="max-height:45vh;border-radius:12px;border:3px solid var(--ink)">`,
-      summary,
-      buttons,
-      allowClose: false
+      body: canRetake ? 'Pakai foto ini atau retake?' : 'Pakai foto ini ya!',
+      previewHTML: `<img src="${dataURL}" style="max-height:40vh;border-radius:12px;border:3px solid var(--ink)">`,
+      summary: { Slot: `${slotIndex + 1}/${state.gridCount}`, 'Retake used': `${retakeCount}/${MAX_RETAKES}` },
+      buttons, allowClose: false
     });
   });
 }
 
-// ============ BUILD PHOTO STRIP ============
+// ============ BUILD PHOTO STRIP (DOUBLE + RANDOMIZED) ============
+function shuffleArray(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 function buildPhotoStrip() {
   const canvas = document.getElementById('stripCanvas');
   const photos = state.capturedPhotos;
   const n = photos.length;
-  const photoW = 700;
-  const photoH = 525;
-  const padding = 35;
-  const gap = 22;
-  const footerH = 140;
-  const stripW = photoW + padding * 2;
-  const stripH = padding * 2 + n * photoH + (n - 1) * gap + footerH;
+
+  // STRIP DOUBLE: 2 columns × n rows = n*2 total
+  // Each column is a separately-shuffled copy
+  const leftOrder = shuffleArray([...Array(n).keys()]);
+  const rightOrder = shuffleArray([...Array(n).keys()]);
+  // Pastikan dua kolom tidak identik
+  if (n > 1 && leftOrder.every((v, i) => v === rightOrder[i])) {
+    [rightOrder[0], rightOrder[1]] = [rightOrder[1], rightOrder[0]];
+  }
+
+  const photoW = 520;
+  const photoH = 390;
+  const padding = 30;
+  const gap = 16;
+  const colGap = 24;
+  const footerH = 130;
+  const headerH = 70;
+  const stripW = padding * 2 + colGap + photoW * 2;
+  const stripH = padding * 2 + headerH + n * photoH + (n - 1) * gap + footerH;
 
   canvas.width = stripW;
   canvas.height = stripH;
@@ -823,6 +760,14 @@ function buildPhotoStrip() {
   const isDark = isColorDark(state.stripColor);
   const textColor = isDark ? '#fffdf5' : '#1a1a1a';
 
+  // Header
+  ctx.fillStyle = textColor;
+  ctx.font = 'bold 36px Sniglet, cursive';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Nailong Photobooth 🐲', stripW / 2, padding + headerH / 2);
+
+  // Load all images
   const imgs = photos.map(p => { const img = new Image(); img.src = p.dataURL; return img; });
   let loaded = 0;
   imgs.forEach(img => {
@@ -832,27 +777,67 @@ function buildPhotoStrip() {
 
   function drawStrip() {
     const frame = window.FRAMES.find(f => f.id === state.selectedFrame);
-    imgs.forEach((img, i) => {
-      const y = padding + i * (photoH + gap);
+    const startY = padding + headerH;
+
+    // Inset padding: frame dilukis di area penuh, foto di-shrink ke tengah
+    // sehingga frame jadi background border yang terlihat di pinggir foto.
+    const insetRatio = 0.15; // 15% inset dari setiap sisi
+    const insetX = photoW * insetRatio;
+    const insetY = photoH * insetRatio;
+    const innerW = photoW - insetX * 2;
+    const innerH = photoH - insetY * 2;
+
+    function drawFrameWithPhoto(img, x, y) {
+      // Step 1: Draw frame BG covering full area
+      try {
+        frame.render(ctx, x, y, photoW, photoH, frame, {
+          size: 50,
+          tapeW: 110,
+          tapeH: 26,
+          borderW: Math.min(photoW, photoH) * 0.08
+        });
+      } catch (e) { console.error('Frame render error', e); }
+
+      // Step 2: Draw photo on top, inset into middle area
+      const px = x + insetX;
+      const py = y + insetY;
+      // White paper backing behind photo (so photo "sits on top" of frame)
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(px - 6, py - 6, innerW + 12, innerH + 12);
+      drawCover(ctx, img, px, py, innerW, innerH);
+
+      // Photo border
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(px, py, innerW, innerH);
+    }
+
+    // LEFT column
+    for (let i = 0; i < n; i++) {
+      const photoIdx = leftOrder[i];
+      const img = imgs[photoIdx];
       const x = padding;
-      drawCover(ctx, img, x, y, photoW, photoH);
-      ctx.strokeStyle = textColor;
-      ctx.lineWidth = 4;
-      ctx.strokeRect(x, y, photoW, photoH);
-      frame.render(ctx, x, y, photoW, photoH, frame, { size: 65, tapeW: 140, tapeH: 32 });
-    });
+      const y = startY + i * (photoH + gap);
+      drawFrameWithPhoto(img, x, y);
+    }
 
+    // RIGHT column
+    for (let i = 0; i < n; i++) {
+      const photoIdx = rightOrder[i];
+      const img = imgs[photoIdx];
+      const x = padding + photoW + colGap;
+      const y = startY + i * (photoH + gap);
+      drawFrameWithPhoto(img, x, y);
+    }
+
+    // Footer
     ctx.fillStyle = textColor;
-    ctx.font = 'bold 42px Sniglet, cursive';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('Nailong Photobooth 🐲', stripW / 2, stripH - footerH / 2 - 30);
-
     ctx.font = '500 16px DM Mono, monospace';
+    ctx.textAlign = 'center';
     const date = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
-    ctx.fillText(date, stripW / 2, stripH - footerH / 2 + 5);
-    ctx.font = 'italic 16px Fraunces, serif';
-    ctx.fillText('made with ♥ by Syafrizal', stripW / 2, stripH - footerH / 2 + 35);
+    ctx.fillText(date, stripW / 2, stripH - footerH / 2 - 12);
+    ctx.font = 'italic 18px Fraunces, serif';
+    ctx.fillText('made with ♥ by Syafrizal', stripW / 2, stripH - footerH / 2 + 18);
 
     state.lastStripCanvas = canvas;
     showResultModal();
@@ -876,130 +861,43 @@ function isColorDark(hex) {
   return (0.299 * r + 0.587 * g + 0.114 * b) < 128;
 }
 
-// ============ RESULT MODAL ============
+// ============ RESULT MODALS ============
 function showResultModal() {
   const canvas = state.lastStripCanvas;
   const imgURL = canvas.toDataURL('image/png');
   const frame = window.FRAMES.find(f => f.id === state.selectedFrame);
-
   openModal({
     title: '🎉 Photo Strip Selesai!',
-    body: 'Mau diapain hasilnya? Pilih opsi di bawah:',
+    body: `Strip double dengan ${state.gridCount * 2} foto diacak. Mau diapain?`,
     previewHTML: `<img src="${imgURL}" alt="Photo strip">`,
-    summary: {
-      Photos: state.gridCount,
-      Frame: frame.label,
-      Date: new Date().toLocaleDateString('id-ID')
-    },
+    summary: { Photos: state.gridCount * 2, Frame: frame.label, Date: new Date().toLocaleDateString('id-ID') },
     buttons: [
       { label: '⬇ Download PNG', class: 'btn-primary', onClick: downloadStrip },
-      { label: '📧 Kirim ke Email', class: 'btn-mint', onClick: showEmailModalForPhoto },
-      { label: '🎞 Buat GIF', class: 'btn-secondary', onClick: makeGifFromStrip },
-      { label: '📷 Take Again', class: 'btn-ghost', onClick: () => { closeModal(); showHelp('Klik 📷 Take Photos untuk sesi baru'); }}
+      { label: '📧 Kirim Email', class: 'btn-mint', onClick: () => showEmailModalForPhoto() },
+      { label: '📷 Take Again', class: 'btn-ghost', onClick: () => { closeModal(); showHelp('Klik Take Photos lagi'); }}
     ],
     wide: true
   });
 }
 
-// ============ DOWNLOAD ============
 function downloadStrip() {
   const canvas = state.lastStripCanvas;
   const a = document.createElement('a');
   a.href = canvas.toDataURL('image/png');
   a.download = `nailong-photostrip-${Date.now()}.png`;
   a.click();
-  showHelp('Tersimpan! 🎉 Cek folder Downloads.');
-}
-
-// ============ GIF FROM STRIP (animate through photos) ============
-async function makeGifFromStrip() {
-  if (state.capturedPhotos.length === 0) return;
-
-  // Show loading
-  openModal({
-    title: 'Bikin GIF... 🎞',
-    body: 'Sebentar ya, lagi convert semua foto jadi animasi GIF',
-    previewHTML: '<div class="spinner"></div>',
-    buttons: [],
-    allowClose: false
-  });
-
-  // Wait a frame so modal shows
-  await new Promise(r => setTimeout(r, 50));
-
-  try {
-    const W = 400, H = 300;
-    const frame = window.FRAMES.find(f => f.id === state.selectedFrame);
-
-    // Build canvas frames
-    const canvases = [];
-    for (const photo of state.capturedPhotos) {
-      const img = await loadImage(photo.dataURL);
-      const c = document.createElement('canvas');
-      c.width = W;
-      c.height = H;
-      const cx = c.getContext('2d');
-      cx.fillStyle = state.stripColor;
-      cx.fillRect(0, 0, W, H);
-      drawCover(cx, img, 0, 0, W, H);
-      frame.render(cx, 0, 0, W, H, frame, { size: 28, tapeW: 70, tapeH: 16 });
-      canvases.push(c);
-    }
-
-    const blob = await window.createGifBlob(canvases, 700);
-    state.lastGifBlob = blob;
-    showGifResult(blob);
-  } catch (err) {
-    console.error('GIF error', err);
-    openModal({
-      title: 'GIF Error 😢',
-      body: err.message,
-      buttons: [{ label: 'OK', class: 'btn-primary', onClick: showResultModal }]
-    });
-  }
-}
-
-function showGifResult(blob) {
-  const url = URL.createObjectURL(blob);
-  openModal({
-    title: 'GIF Done! 🎞',
-    body: 'Animated GIF dari foto kamu:',
-    previewHTML: `<img src="${url}" alt="GIF">`,
-    buttons: [
-      { label: '⬇ Download GIF', class: 'btn-primary', onClick: () => {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `nailong-gif-${Date.now()}.gif`;
-        a.click();
-        showHelp('GIF tersimpan!');
-      }},
-      { label: '📧 Kirim ke Email', class: 'btn-mint', onClick: () => showEmailModalForGif(blob) },
-      { label: '← Back', class: 'btn-ghost', onClick: showResultModal }
-    ]
-  });
-}
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
+  showHelp('Tersimpan! 🎉');
 }
 
 // ============ VIDEO RECORDING ============
 function confirmToggleVideo() {
   if (state.isCapturing) return;
-  if (state.isRecording) {
-    stopVideoRecording();
-    return;
-  }
+  if (state.isRecording) { stopVideoRecording(); return; }
   openModal({
-    title: 'Mulai Rekam Video? 🎥',
-    body: 'Video direkam dengan audio sampai kamu klik Stop. Setelah selesai bisa di-download atau di-kirim ke email.',
+    title: 'Mulai Rekam? 🎥',
+    body: 'Video direkam sampai kamu klik Stop.',
     buttons: [
-      { label: '🔴 Start Recording', class: 'btn-primary', onClick: () => { closeModal(); startVideoRecording(); }},
+      { label: '🔴 Start', class: 'btn-primary', onClick: () => { closeModal(); startVideoRecording(); }},
       { label: 'Cancel', class: 'btn-ghost', onClick: closeModal }
     ]
   });
@@ -1047,7 +945,6 @@ function stopVideoRecording() {
   state.mediaRecorder.stop();
   state.isRecording = false;
   clearInterval(state.recordTimer);
-
   const btn = document.getElementById('videoBtn');
   btn.innerHTML = '🎥 Record Video';
   btn.classList.remove('btn-primary');
@@ -1060,7 +957,7 @@ function showVideoResult(blob) {
   const url = URL.createObjectURL(blob);
   openModal({
     title: '🎬 Video Selesai!',
-    body: 'Preview dulu, lalu pilih opsi:',
+    body: 'Preview, lalu pilih opsi:',
     previewHTML: `<video src="${url}" controls autoplay></video>`,
     buttons: [
       { label: '⬇ Download Video', class: 'btn-primary', onClick: () => {
@@ -1070,136 +967,48 @@ function showVideoResult(blob) {
         a.click();
         showHelp('Video tersimpan!');
       }},
-      { label: '📧 Kirim ke Email', class: 'btn-mint', onClick: () => showEmailModalForVideo(blob) },
-      { label: '🔄 Bikin Boomerang', class: 'btn-secondary', onClick: () => makeBoomerang(blob) },
       { label: '🎥 Rekam Lagi', class: 'btn-ghost', onClick: closeModal }
     ]
   });
 }
 
-// ============ BOOMERANG (play forward + reverse) ============
-async function makeBoomerang(videoBlob) {
-  openModal({
-    title: 'Bikin Boomerang... 🔄',
-    body: 'Sebentar, lagi extract frames dari video',
-    previewHTML: '<div class="spinner"></div>',
-    buttons: [],
-    allowClose: false
-  });
-
-  try {
-    const video = document.createElement('video');
-    video.src = URL.createObjectURL(videoBlob);
-    video.muted = true;
-    await new Promise((resolve, reject) => {
-      video.onloadedmetadata = resolve;
-      video.onerror = reject;
-    });
-
-    const duration = Math.min(video.duration, 3); // max 3 sec
-    const fps = 8;
-    const totalFrames = Math.floor(duration * fps);
-    const W = 400;
-    const H = Math.floor(W * (video.videoHeight / video.videoWidth));
-
-    const canvases = [];
-    for (let i = 0; i < totalFrames; i++) {
-      const t = (i / totalFrames) * duration;
-      video.currentTime = t;
-      await new Promise(r => video.onseeked = r);
-      const c = document.createElement('canvas');
-      c.width = W;
-      c.height = H;
-      const cx = c.getContext('2d');
-      cx.drawImage(video, 0, 0, W, H);
-      canvases.push(c);
-    }
-
-    // Reverse (excluding last frame to avoid duplicate)
-    const reversed = canvases.slice(0, -1).reverse();
-    const boomerangFrames = [...canvases, ...reversed];
-
-    const blob = await window.createGifBlob(boomerangFrames, 1000 / fps);
-    state.lastBoomerangBlob = blob;
-
-    const url = URL.createObjectURL(blob);
-    openModal({
-      title: 'Boomerang Done! 🔄',
-      body: 'Maju mundur ala Instagram:',
-      previewHTML: `<img src="${url}" alt="Boomerang">`,
-      buttons: [
-        { label: '⬇ Download Boomerang', class: 'btn-primary', onClick: () => {
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `nailong-boomerang-${Date.now()}.gif`;
-          a.click();
-        }},
-        { label: '📧 Kirim ke Email', class: 'btn-mint', onClick: () => showEmailModalForGif(blob) },
-        { label: '← Back', class: 'btn-ghost', onClick: () => showVideoResult(videoBlob) }
-      ]
-    });
-  } catch (err) {
-    openModal({
-      title: 'Boomerang Error',
-      body: err.message,
-      buttons: [{ label: 'OK', class: 'btn-primary', onClick: () => showVideoResult(videoBlob) }]
-    });
-  }
-}
-
-// ============ EMAIL ============
+// ============ EMAIL via EmailJS ============
 function showEmailModalForPhoto() {
-  const blob = dataURLtoBlob(state.lastStripCanvas.toDataURL('image/png'));
-  showEmailModal(blob, 'image/png', 'photostrip.png', 'Photo Strip');
-}
+  if (!window.emailjs || EMAILJS_CONFIG.PUBLIC_KEY === 'YOUR_PUBLIC_KEY_HERE') {
+    openModal({
+      title: 'Email Belum Disetup ⚙️',
+      body: 'EmailJS belum dikonfigurasi. Owner perlu setup EmailJS dulu (lihat README).',
+      buttons: [{ label: 'OK', class: 'btn-primary', onClick: showResultModal }]
+    });
+    return;
+  }
 
-function showEmailModalForVideo(blob) {
-  showEmailModal(blob, blob.type, 'video.webm', 'Video');
-}
-
-function showEmailModalForGif(blob) {
-  showEmailModal(blob, 'image/gif', 'animation.gif', 'GIF');
-}
-
-function dataURLtoBlob(dataURL) {
-  const arr = dataURL.split(',');
-  const mime = arr[0].match(/:(.*?);/)[1];
-  const bstr = atob(arr[1]);
-  let n = bstr.length;
-  const u8arr = new Uint8Array(n);
-  while (n--) u8arr[n] = bstr.charCodeAt(n);
-  return new Blob([u8arr], { type: mime });
-}
-
-function showEmailModal(blob, mimeType, filename, kind) {
   const formHTML = `
     <div class="email-form">
-      <label for="emailTo">Email Penerima</label>
+      <label for="emailTo">Email Penerima *</label>
       <input type="email" id="emailTo" placeholder="contoh@email.com" required>
       <div class="input-error" id="emailToError">Email tidak valid</div>
-
       <label for="emailName">Nama Penerima (opsional)</label>
       <input type="text" id="emailName" placeholder="Nama si penerima">
-
       <label for="emailMessage">Pesan (opsional)</label>
       <textarea id="emailMessage" rows="3" placeholder="Halo! Ini foto kita di Nailong Photobooth 🐲"></textarea>
     </div>
   `;
 
   openModal({
-    title: `📧 Kirim ${kind} ke Email`,
-    body: 'Isi data berikut, foto akan dikirim sebagai lampiran.',
+    title: '📧 Kirim Photo Strip ke Email',
+    body: 'Photo strip akan dikirim sebagai link gambar yang bisa langsung dilihat di email.',
     formHTML,
     buttons: [
-      { label: '📤 Send Email', class: 'btn-primary', id: 'sendEmailBtn', onClick: () => sendEmail(blob, mimeType, filename, kind) },
-      { label: 'Cancel', class: 'btn-ghost', onClick: closeModal }
+      { label: '📤 Send Email', class: 'btn-primary', id: 'sendEmailBtn', onClick: sendPhotoEmail },
+      { label: 'Cancel', class: 'btn-ghost', onClick: showResultModal }
     ]
   });
 }
 
-async function sendEmail(blob, mimeType, filename, kind) {
+async function sendPhotoEmail() {
   const to = document.getElementById('emailTo').value.trim();
-  const name = document.getElementById('emailName').value.trim();
+  const name = document.getElementById('emailName').value.trim() || 'there';
   const message = document.getElementById('emailMessage').value.trim();
   const errEl = document.getElementById('emailToError');
 
@@ -1214,69 +1023,75 @@ async function sendEmail(blob, mimeType, filename, kind) {
   btn.textContent = 'Sending...';
 
   try {
-    // Convert blob to base64
-    const base64 = await blobToBase64(blob);
+    // Convert canvas to base64 image (EmailJS template accepts img tag with base64)
+    const imgBase64 = state.lastStripCanvas.toDataURL('image/jpeg', 0.85);
 
-    const res = await fetch('/api/send-email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        to,
-        name,
-        message,
-        kind,
-        filename,
-        attachment: base64,
-        mimeType
-      })
-    });
+    // Check size — EmailJS has 50KB limit for variables, so big base64 won't work
+    // Fallback: kasih link download lewat dataURL temporarily (akan saya pakai workaround upload ke imgbb gratis API)
+    const imgUrl = await uploadToImgBB(imgBase64);
 
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Failed to send');
-    }
+    const result = await emailjs.send(
+      EMAILJS_CONFIG.SERVICE_ID,
+      EMAILJS_CONFIG.TEMPLATE_ID,
+      {
+        to_email: to,
+        to_name: name,
+        from_name: 'Nailong Photobooth',
+        message: message || 'Ini photo strip kamu di Nailong Photobooth!',
+        photo_url: imgUrl
+      }
+    );
 
     openModal({
       title: '✓ Email Terkirim!',
-      body: `${kind} berhasil dikirim ke <strong>${to}</strong>. Cek inbox-nya ya!`,
+      body: `Photo strip berhasil dikirim ke <strong>${to}</strong>. Cek inbox & folder spam ya!`,
       buttons: [{ label: 'Mantap!', class: 'btn-primary', onClick: closeModal }]
     });
   } catch (err) {
+    console.error('Email error:', err);
     openModal({
       title: 'Email Gagal 😢',
-      body: 'Gagal kirim email: ' + err.message + '<br><br>Pastikan backend server jalan & API key sudah diisi di .env',
+      body: 'Gagal kirim email: ' + (err.text || err.message || 'Unknown error') + '<br><br>Cek koneksi & EmailJS quota.',
       buttons: [
-        { label: 'Try Again', class: 'btn-primary', onClick: () => showEmailModal(blob, mimeType, filename, kind) },
+        { label: 'Try Again', class: 'btn-primary', onClick: showEmailModalForPhoto },
         { label: 'Cancel', class: 'btn-ghost', onClick: closeModal }
       ]
     });
   }
 }
 
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const dataURL = reader.result;
-      // Strip the "data:mime/type;base64," prefix
-      const base64 = dataURL.split(',')[1];
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
+// Upload base64 image to ImgBB (free image hosting, used for email)
+// Get API key gratis di: https://api.imgbb.com/
+const IMGBB_API_KEY = '62a99880797f42ab6afda1e21d9c1e4c';
+
+async function uploadToImgBB(base64Image) {
+  if (IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') {
+    throw new Error('IMGBB_API_KEY belum disetup. Daftar gratis di api.imgbb.com');
+  }
+  // Strip data: prefix
+  const base64Data = base64Image.split(',')[1];
+  const formData = new FormData();
+  formData.append('image', base64Data);
+
+  const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+    method: 'POST',
+    body: formData
   });
+  const data = await res.json();
+  if (!data.success) throw new Error('ImgBB upload failed');
+  return data.data.url;
 }
 
 // ============ WELCOME ============
 function showWelcome() {
   openModal({
     title: 'Hai! Welcome to Nailong Photobooth 🐲',
-    body: 'Bikin photo strip lucu dengan wizard interaktif. Ada 4 step: pilih <strong>kamera</strong> → <strong>layout</strong> → <strong>warna</strong> → <strong>frame</strong>. Setiap foto bisa di-retake max 3x kalau gak suka hasilnya.',
+    body: 'Bikin photo strip lucu dengan wizard interaktif! Pilih kamera → layout → warna → frame, lalu foto. Hasilnya jadi <strong>strip double dengan foto diacak</strong>.',
     buttons: [
       { label: '✨ Start Wizard', class: 'btn-primary btn-big', onClick: () => {
         closeModal();
         setStep(1);
-        showHelp('Step 1: Pilih kamera, klik Test Camera, lalu Confirm Camera');
+        showHelp('Step 1: Pilih kamera & test');
       }}
     ],
     allowClose: false
@@ -1286,17 +1101,11 @@ function showWelcome() {
 // ============ BOOTSTRAP ============
 async function bootstrap() {
   initUI();
-
-  // Try to load Nailong images first
   await window.loadNailongImages();
-
-  // Initial camera permission + enumerate
   await enumerateCameras();
   populateCameraSelect();
 
-  // Try to start a default camera silently, so welcome page has a preview.
-  // If it fails here, DON'T pop the error modal — let user trigger via "Test Camera" instead.
-  // This avoids the annoying error popup before user even gets to read Welcome.
+  // Try start camera silently
   if (state.devices.length > 0) {
     try {
       const tempStream = await navigator.mediaDevices.getUserMedia({
@@ -1307,13 +1116,11 @@ async function bootstrap() {
       const video = document.getElementById('video');
       video.srcObject = tempStream;
       video.addEventListener('loadedmetadata', updateLivePreview, { once: true });
-      // Don't mark cameraTested true — user still needs to confirm in wizard
     } catch (err) {
-      // Silently fail. User will see "Click Test Camera" in step 1.
-      console.warn('Initial preview failed (this is OK):', err.name, err.message);
+      console.warn('Initial preview failed:', err.name);
       const statusEl = document.getElementById('cameraStatus');
       if (statusEl) {
-        statusEl.innerHTML = `⚠ Preview gagal (<code>${err.name}</code>) — coba "Test Camera" setelah tutup app lain yang pake webcam`;
+        statusEl.innerHTML = `⚠ Klik "Test Camera" untuk preview`;
         statusEl.className = 'camera-status testing';
       }
     }

@@ -1,140 +1,132 @@
-# 🐲 Nailong Photobooth
+# 🐲 Nailong Photobooth v3
 
-Photobooth web profesional dengan kamera, frame lucu, GIF, video, dan kirim ke email.
+Photobooth web profesional dengan kamera, frame mencolok, strip double, dan kirim ke email.
 Made with ♥ by Syafrizal.
 
 ## ✨ Fitur
 
-- 📸 Foto 3 atau 4 grid dengan countdown 5 detik
-- 🔄 **Retake up to 3 kali** per foto
+- 📸 Foto 3 atau 4 grid, hasilnya **strip double (×2) dengan urutan diacak**
+- 🔄 Retake max 3x per foto, countdown 5 detik
 - 🎥 Video recording dengan audio
-- 🎞 Convert ke GIF animated
-- 🔄 Boomerang style (maju-mundur)
-- 📷 **Multi-camera support** dengan testing
-- 🎨 10 warna strip + 27 frame lucu (border, scene, character, scrapbook)
-- 📧 **Kirim ke email langsung dengan attachment** (via Resend API)
-- ⬇ Download semua hasil
+- 📷 Multi-camera support dengan testing
+- 🎨 10 warna strip + **25 frame mencolok** (Themed, Scene, Layered, Border)
+- 📧 Kirim ke email manapun via EmailJS (tanpa backend!)
+- 📱 Mobile responsive (skala otomatis di HP)
+- ⬇ Download PNG photo strip & video WebM
 - 🧙 Wizard step-by-step interaktif
 
-## 📁 Struktur Folder
+## 🚀 Setup Pertama Kali
+
+### 1. Daftar EmailJS (untuk fitur kirim email)
+
+EmailJS = service yang biarin web kirim email via Gmail Anda, tanpa server.
+
+1. Daftar gratis: https://www.emailjs.com/
+2. **Connect Gmail**: Dashboard → Email Services → **Add New Service** → pilih **Gmail** → connect akun Gmail Anda → catat **Service ID** (format `service_xxx`)
+3. **Bikin Template**: Dashboard → Email Templates → **Create New Template**
+   - **Subject**: `🐲 Photo dari Nailong Photobooth!`
+   - **Content**: paste template di bawah ini
+   - **To Email**: `{{to_email}}`
+   - **From Name**: `{{from_name}}`
+   - Save → catat **Template ID** (format `template_xxx`)
+4. **Get Public Key**: Dashboard → Account → General → copy **Public Key**
+
+#### Template Email (copy-paste ke EmailJS Template Editor)
+```html
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#fff5d6;">
+  <div style="background:#fffdf5;border:3px solid #1a1a1a;border-radius:20px;padding:30px;">
+    <h1 style="text-align:center;color:#1a1a1a;">🐲 Nailong Photobooth</h1>
+    <p>Hai <strong>{{to_name}}</strong>!</p>
+    <p>{{message}}</p>
+    <div style="text-align:center;margin:20px 0;">
+      <img src="{{photo_url}}" alt="Photo Strip" style="max-width:100%;border:3px solid #1a1a1a;border-radius:12px;" />
+    </div>
+    <p style="text-align:center;font-size:13px;color:#666;margin-top:30px;">
+      Made with ♥ by Syafrizal
+    </p>
+  </div>
+</div>
+```
+
+### 2. Daftar ImgBB (untuk upload gambar ke email)
+
+ImgBB = free image hosting (untuk attach foto di email tanpa quota EmailJS).
+
+1. Buka https://api.imgbb.com/
+2. Sign up (gratis, langsung)
+3. Klik **"Get API key"** → copy API key-nya
+
+### 3. Isi kredensial di `public/js/app.js`
+
+Edit file `public/js/app.js`, cari bagian paling atas:
+
+```js
+const EMAILJS_CONFIG = {
+  PUBLIC_KEY: 'YOUR_PUBLIC_KEY_HERE',      // <- ganti
+  SERVICE_ID: 'YOUR_SERVICE_ID_HERE',      // <- ganti
+  TEMPLATE_ID: 'YOUR_TEMPLATE_ID_HERE'     // <- ganti
+};
+```
+
+dan:
+
+```js
+const IMGBB_API_KEY = 'YOUR_IMGBB_API_KEY_HERE';  // <- ganti
+```
+
+Isi 4 kredensial itu dengan yang dari step 1 & 2.
+
+### 4. Taro gambar Nailong
+
+Letakkan 4 file PNG di `public/images/`:
+- `nailong1.png`, `nailong2.png`, `nailong3.png`, `nailong4.png`
+- Format PNG transparan, ukuran 200×200px+ recommended
+
+Kalau gak ada file, auto fallback ke emoji 🐲.
+
+### 5. Deploy
+
+**Lokal (untuk test)**: buka `public/index.html` di browser, atau pake Live Server di VS Code.
+
+**Vercel**:
+1. Push ke GitHub
+2. Import di vercel.com → Deploy
+3. **Tidak perlu Environment Variables!** Semua kredensial ada di JS file.
+
+## 📁 Struktur
 
 ```
 photobooth/
-├── package.json
-├── .env                        ← bikin sendiri dari .env.example
-├── .env.example
-├── public/                     ← frontend (HTML/CSS/JS)
+├── public/
 │   ├── index.html
 │   ├── css/style.css
 │   ├── js/
-│   │   ├── app.js
-│   │   ├── frames.js
-│   │   └── gif-encoder.js
-│   └── images/                 ← TARUH GAMBAR NAILONG DI SINI
-│       ├── nailong1.png        ← (pojok kiri atas frame)
-│       ├── nailong2.png        ← (pojok kanan atas frame)
-│       ├── nailong3.png        ← (pojok kiri bawah frame)
-│       └── nailong4.png        ← (pojok kanan bawah frame)
-└── server/
-    └── server.js               ← backend Express
+│   │   ├── app.js          ← isi EmailJS + ImgBB key di sini
+│   │   └── frames.js
+│   └── images/
+│       └── nailong1-4.png  ← gambar Nailong Anda
+├── vercel.json
+└── README.md
 ```
-
-## 🚀 Setup (Pertama Kali)
-
-### 1. Install Node.js
-Download dari https://nodejs.org (versi 18 atau lebih baru).
-Cek di terminal: `node --version`
-
-### 2. Taruh gambar Nailong
-Letakkan **4 file gambar Nailong** di folder `public/images/`:
-- `nailong1.png` — akan muncul di pojok kiri atas + sebagai maskot di header
-- `nailong2.png` — pojok kanan atas
-- `nailong3.png` — pojok kiri bawah
-- `nailong4.png` — pojok kanan bawah
-
-**Catatan**:
-- Kalau cuma punya 1 gambar Nailong, copy 4x dengan nama berbeda
-- Format PNG dengan background transparan paling bagus
-- Ukuran disarankan 200x200px atau lebih (square)
-- Kalau file gak ada, otomatis pakai emoji 🐲
-
-### 3. Daftar Resend (untuk fitur kirim email)
-1. Buka https://resend.com → Sign up (gratis)
-2. Pergi ke **API Keys** → Create API Key
-3. Copy API key-nya (format `re_xxx...`)
-
-### 4. Bikin file `.env`
-Copy file `.env.example` jadi `.env`:
-
-```bash
-cp .env.example .env
-```
-
-Edit file `.env`, isi API key Resend:
-```
-RESEND_API_KEY=re_apikey_kamu_disini
-FROM_EMAIL=onboarding@resend.dev
-PORT=3000
-```
-
-> ℹ️ `onboarding@resend.dev` adalah email default Resend untuk testing.
-> Untuk production, verifikasi domain kamu sendiri di Resend dashboard.
-
-### 5. Install dependencies
-```bash
-npm install
-```
-
-### 6. Run server
-```bash
-npm start
-```
-
-Server akan jalan di **http://localhost:3000**.
-Buka URL itu di browser (Chrome/Edge recommended).
-
-## 🎬 Cara Pakai
-
-1. Buka http://localhost:3000
-2. Welcome modal muncul → klik **Start Wizard**
-3. **Step 1**: Pilih kamera dari dropdown → Test Camera → Confirm Camera
-4. **Step 2**: Pilih layout (3 atau 4 grid) → Confirm Layout
-5. **Step 3**: Pilih warna strip → Confirm Color
-6. **Step 4**: Pilih frame (4 kategori: Border / Scene / Chara / Scrap) → Confirm Frame
-7. Klik **📷 Take Photos** atau **🎥 Record Video**
-8. Setelah tiap foto, pilih: **Pakai** atau **Retake** (max 3x retake per slot)
-9. Hasil keluar → pilih: Download / Kirim Email / Bikin GIF / Boomerang
 
 ## 🐛 Troubleshooting
 
-**Kamera tidak terdeteksi?**
-- Pastikan izinkan akses kamera di browser
-- Coba browser lain (Chrome paling kompatibel)
-- Akses harus pakai `http://localhost` atau `https://` (tidak bisa `file://`)
+### Email gagal kirim
+- Cek EmailJS dashboard → Logs untuk lihat error
+- Pastikan template variable cocok: `{{to_email}}`, `{{to_name}}`, `{{message}}`, `{{photo_url}}`
+- Cek quota EmailJS (200/bulan free)
 
-**Email tidak terkirim?**
-- Cek file `.env` API key sudah benar
-- Cek terminal apakah ada error message
-- Domain `onboarding@resend.dev` hanya bisa kirim ke email yang sudah diverifikasi di Resend dashboard
+### Foto/photo strip tidak muncul di email
+- Cek ImgBB API key
+- Cek size foto, ImgBB max 32MB
 
-**Mau pakai email dengan domain sendiri?**
-- Login Resend → Domains → Add domain
-- Ikuti instruksi setup DNS
-- Update `FROM_EMAIL` di `.env`
+### Kamera error
+- HTTPS only di production (Vercel auto-provide)
+- Lihat detail di console (F12)
 
-**Error saat install?**
-- Pastikan Node.js v18+
-- Hapus folder `node_modules` dan file `package-lock.json`, lalu `npm install` lagi
-
-## 🚢 Deploy ke Production
-
-Bisa di-deploy ke:
-- **Vercel** (gratis): set environment variables di dashboard
-- **Railway**: connect repo, set env vars
-- **Render**: similar
-- **VPS**: pakai PM2 atau systemd
-
-Pastikan setting `RESEND_API_KEY` di environment variable production.
+### Frame tidak keren / terlalu sederhana
+- Coba category **Themed** (paling mencolok)
+- Coba frame Birthday, Galaxy, Tropical, Sakura, Rainbow
 
 ---
 
