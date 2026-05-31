@@ -195,6 +195,18 @@ h1 {
     font-size: 11px;
   }
   .sticker { display: none !important; }
+  /* GUARANTEE preview kotak 4:3 di HP, sama dengan hasil foto */
+  .camera-wrapper {
+    aspect-ratio: 4/3 !important;
+    max-width: 100%;
+    margin: 0 auto;
+  }
+  /* Strip preview thumbnails — biar pas dengan rasio foto kotak */
+  .strip-slot {
+    aspect-ratio: 4/3 !important;
+    height: auto !important;
+    width: 70px !important;
+  }
 }
 
 /* ============ CAMERA PANEL ============ */

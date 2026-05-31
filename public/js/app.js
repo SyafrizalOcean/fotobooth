@@ -44,7 +44,8 @@ const state = {
   recordTimer: null,
 
   lastStripCanvas: null,
-  lastVideoBlob: null
+  lastVideoBlob: null,
+  lastGifBlob: null
 };
 
 const MAX_RETAKES = 3;
@@ -654,6 +655,8 @@ async function startPhotoSession() {
   state.isCapturing = true;
   state.capturedPhotos = [];
   state.currentSlot = 0;
+  state.lastGifBlob = null;
+  state.lastStripCanvas = null;
   document.getElementById('snapBtn').disabled = true;
   document.getElementById('videoBtn').disabled = true;
   document.getElementById('frameOverlay').style.display = 'none';
@@ -861,21 +864,120 @@ function isColorDark(hex) {
   return (0.299 * r + 0.587 * g + 0.114 * b) < 128;
 }
 
+// ============ GIF GENERATION ============
+// gif.js worker URL — fetch as blob to avoid same-origin restriction
+let gifWorkerBlobUrl = null;
+
+async function getGifWorkerUrl() {
+  if (gifWorkerBlobUrl) return gifWorkerBlobUrl;
+  const response = await fetch('https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js');
+  if (!response.ok) throw new Error('Failed to fetch gif.worker.js');
+  const blob = await response.blob();
+  gifWorkerBlobUrl = URL.createObjectURL(blob);
+  return gifWorkerBlobUrl;
+}
+
+async function generateGif() {
+  if (!state.capturedPhotos.length) return null;
+  if (typeof GIF === 'undefined') {
+    throw new Error('gif.js library belum di-load');
+  }
+
+  const workerScript = await getGifWorkerUrl();
+  const frame = window.FRAMES.find(f => f.id === state.selectedFrame);
+
+  // GIF size — kecil supaya cepet & file ga terlalu besar
+  const W = 480;
+  const H = 360; // 4:3 aspect ratio (sama dengan preview kamera & hasil foto)
+
+  // Bikin canvas frames untuk tiap foto + frame yang dipilih
+  const photoCanvases = [];
+  for (const photo of state.capturedPhotos) {
+    const img = await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = reject;
+      im.src = photo.dataURL;
+    });
+
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const cx = c.getContext('2d');
+    cx.fillStyle = state.stripColor;
+    cx.fillRect(0, 0, W, H);
+
+    // Draw frame as background
+    try {
+      frame.render(cx, 0, 0, W, H, frame, {
+        size: 35, tapeW: 80, tapeH: 18,
+        borderW: Math.min(W, H) * 0.08
+      });
+    } catch (e) { console.warn('Frame in GIF error:', e); }
+
+    // Inset photo (sama dengan strip layout)
+    const inset = 0.15;
+    const px = W * inset;
+    const py = H * inset;
+    const iw = W * (1 - inset * 2);
+    const ih = H * (1 - inset * 2);
+    cx.fillStyle = '#fff';
+    cx.fillRect(px - 4, py - 4, iw + 8, ih + 8);
+    drawCover(cx, img, px, py, iw, ih);
+    cx.strokeStyle = '#1a1a1a';
+    cx.lineWidth = 3;
+    cx.strokeRect(px, py, iw, ih);
+
+    photoCanvases.push(c);
+  }
+
+  // Double the frames (kayak strip double — diacak)
+  const allFrames = [...photoCanvases, ...shuffleArray(photoCanvases)];
+
+  // Build GIF
+  return new Promise((resolve, reject) => {
+    const gif = new GIF({
+      workers: 2,
+      quality: 10,
+      width: W,
+      height: H,
+      workerScript: workerScript
+    });
+
+    allFrames.forEach(c => {
+      gif.addFrame(c, { delay: 500, copy: true });
+    });
+
+    gif.on('finished', blob => resolve(blob));
+    gif.on('error', err => reject(err));
+    gif.render();
+  });
+}
+
 // ============ RESULT MODALS ============
 function showResultModal() {
   const canvas = state.lastStripCanvas;
   const imgURL = canvas.toDataURL('image/png');
   const frame = window.FRAMES.find(f => f.id === state.selectedFrame);
+
+  // Buttons depend on whether GIF already generated
+  const buttons = [
+    { label: '⬇ Download PNG', class: 'btn-primary', onClick: downloadStrip }
+  ];
+  if (state.lastGifBlob) {
+    buttons.push({ label: '🎞 Download GIF', class: 'btn-secondary', onClick: downloadGif });
+  } else {
+    buttons.push({ label: '🎞 Buat GIF', class: 'btn-secondary', onClick: handleGenerateGif });
+  }
+  buttons.push({ label: '📧 Kirim Email', class: 'btn-mint', onClick: () => showEmailModalForPhoto() });
+  buttons.push({ label: '📷 Take Again', class: 'btn-ghost', onClick: () => { closeModal(); showHelp('Klik Take Photos lagi'); }});
+
   openModal({
     title: '🎉 Photo Strip Selesai!',
     body: `Strip double dengan ${state.gridCount * 2} foto diacak. Mau diapain?`,
     previewHTML: `<img src="${imgURL}" alt="Photo strip">`,
     summary: { Photos: state.gridCount * 2, Frame: frame.label, Date: new Date().toLocaleDateString('id-ID') },
-    buttons: [
-      { label: '⬇ Download PNG', class: 'btn-primary', onClick: downloadStrip },
-      { label: '📧 Kirim Email', class: 'btn-mint', onClick: () => showEmailModalForPhoto() },
-      { label: '📷 Take Again', class: 'btn-ghost', onClick: () => { closeModal(); showHelp('Klik Take Photos lagi'); }}
-    ],
+    buttons,
     wide: true
   });
 }
@@ -887,6 +989,53 @@ function downloadStrip() {
   a.download = `nailong-photostrip-${Date.now()}.png`;
   a.click();
   showHelp('Tersimpan! 🎉');
+}
+
+function downloadGif() {
+  if (!state.lastGifBlob) return;
+  const url = URL.createObjectURL(state.lastGifBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `nailong-gif-${Date.now()}.gif`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showHelp('GIF tersimpan! Siap di-share 🎉');
+}
+
+async function handleGenerateGif() {
+  // Show loading modal
+  openModal({
+    title: 'Bikin GIF... 🎞',
+    body: 'Sebentar, lagi convert foto-foto jadi animasi GIF. Proses ~5-15 detik.',
+    previewHTML: '<div class="spinner"></div>',
+    buttons: [],
+    allowClose: false
+  });
+
+  try {
+    const blob = await generateGif();
+    state.lastGifBlob = blob;
+    const url = URL.createObjectURL(blob);
+    openModal({
+      title: '🎞 GIF Selesai!',
+      body: 'Animated GIF siap di-share ke IG Story, WhatsApp, dll:',
+      previewHTML: `<img src="${url}" alt="Animated GIF">`,
+      buttons: [
+        { label: '⬇ Download GIF', class: 'btn-primary', onClick: downloadGif },
+        { label: '← Back to Strip', class: 'btn-ghost', onClick: showResultModal }
+      ]
+    });
+  } catch (err) {
+    console.error('GIF error:', err);
+    openModal({
+      title: 'GIF Gagal 😢',
+      body: 'Error bikin GIF: ' + (err.message || 'Unknown'),
+      buttons: [
+        { label: 'Coba Lagi', class: 'btn-primary', onClick: handleGenerateGif },
+        { label: 'Cancel', class: 'btn-ghost', onClick: showResultModal }
+      ]
+    });
+  }
 }
 
 // ============ VIDEO RECORDING ============
